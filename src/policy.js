@@ -1,11 +1,10 @@
 /**
  * Work-item policy (the ADO analog of "Check for linked work items").
  *
- * A bare AB#359 in the PR is not enough. Azure Boards only rewrites a
- * valid work item in the description into a markdown link:
- *   [AB#123](https://dev.azure.com/{org}/{project}/_workitems/edit/123)
- * Invalid ids, title-only mentions, and unconnected repos stay as plain
- * AB# text and must fail.
+ * Two ways to pass:
+ * 1. Azure Boards rewrote a valid mention into a work-item URL in the PR body
+ *    (only works for the project connected to this GitHub repo).
+ * 2. The check looked up AB# ids in the Azure DevOps org (any project).
  */
 
 const LINKED_RE =
@@ -44,7 +43,16 @@ export function findWorkItemIds(text) {
   return [...new Set([...linked, ...unlinked])];
 }
 
-export function evaluateWorkItemPolicy({ title = "", body = "", author = "" } = {}) {
+function formatIds(ids) {
+  return ids.map((id) => `AB#${id}`).join(", ");
+}
+
+export function evaluateWorkItemPolicy({
+  title = "",
+  body = "",
+  author = "",
+  verifiedIds = null,
+} = {}) {
   if (SKIP_AUTHORS.has(author)) {
     return {
       ok: true,
@@ -55,18 +63,39 @@ export function evaluateWorkItemPolicy({ title = "", body = "", author = "" } = 
     };
   }
 
-  // Azure Boards links the description, not the title. Still scan both so a
-  // title-only AB# is reported as unlinked instead of silently ignored.
   const { linked, unlinked } = extractWorkItems(`${title}\n${body}`);
+  const ids = [...new Set([...linked, ...unlinked])];
 
-  if (linked.length === 0 && unlinked.length === 0) {
+  if (ids.length === 0) {
     return {
       ok: false,
       skipped: false,
       ids: [],
       unlinked: [],
       reason:
-        "No Azure Boards work item found. Add a valid AB#123 to the pull request description (not only the title).",
+        "No Azure Boards work item found. Add AB#123 to the pull request description.",
+    };
+  }
+
+  if (Array.isArray(verifiedIds)) {
+    const verifiedSet = new Set(verifiedIds.map(String));
+    const found = ids.filter((id) => verifiedSet.has(id));
+    const missing = ids.filter((id) => !verifiedSet.has(id));
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        skipped: false,
+        ids: found,
+        unlinked: missing,
+        reason: `Not found in the Azure DevOps organization: ${formatIds(missing)}. Ids are checked across all projects.`,
+      };
+    }
+    return {
+      ok: true,
+      skipped: false,
+      ids: found,
+      unlinked: [],
+      reason: `Verified in Azure Boards: ${formatIds(found)}`,
     };
   }
 
@@ -77,8 +106,9 @@ export function evaluateWorkItemPolicy({ title = "", body = "", author = "" } = 
       ids: [],
       unlinked,
       reason:
-        `Found ${unlinked.map((id) => `AB#${id}`).join(", ")} but Azure Boards did not create a work-item link. ` +
-        "That means the id is invalid, the mention is only in the title, or this GitHub repo is not connected to Azure Boards.",
+        `Found ${formatIds(unlinked)} but Azure Boards did not create a work-item link. ` +
+        "The GitHub connection only links work items in the connected project. " +
+        "Set ADO_ORGANIZATION and ADO_PAT to accept valid ids from any project in that Azure DevOps org.",
     };
   }
 
@@ -89,8 +119,8 @@ export function evaluateWorkItemPolicy({ title = "", body = "", author = "" } = 
       ids: linked,
       unlinked,
       reason:
-        `Unlinked or invalid references: ${unlinked.map((id) => `AB#${id}`).join(", ")}. ` +
-        "Remove them or use work item ids that Azure Boards can link from the PR description.",
+        `Unlinked or invalid references: ${formatIds(unlinked)}. ` +
+        "Remove them, or set ADO_ORGANIZATION and ADO_PAT to verify ids across projects.",
     };
   }
 
@@ -99,6 +129,6 @@ export function evaluateWorkItemPolicy({ title = "", body = "", author = "" } = 
     skipped: false,
     ids: linked,
     unlinked: [],
-    reason: `Linked work items: ${linked.map((id) => `AB#${id}`).join(", ")}`,
+    reason: `Linked work items: ${formatIds(linked)}`,
   };
 }

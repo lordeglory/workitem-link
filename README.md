@@ -82,17 +82,16 @@ The script **merges** with any existing protection. It does not wipe reviews or 
 
 ## What counts as a valid link
 
-`AB#359` as plain text is **not** enough. Azure Boards only converts a **valid** id in the **PR description** into:
+The Azure Boards GitHub app only turns `AB#123` into a Development link when the work item is in the **project connected to this repo**. User Story 356 in Lockton is valid, but it will not be rewritten if GitHub is connected to a different project.
 
-```md
-[AB#123](https://dev.azure.com/{org}/{project}/_workitems/edit/123)
-```
+This check therefore looks up ids in the **Azure DevOps organization** (all projects):
 
-That rewrite is the same signal GitHub shows in the PR Development section. Bare `AB#` text means the id is invalid, it was only put in the title, or this repo is not connected to Azure Boards.
+1. Set repo variable `ADO_ORGANIZATION` to `maunakdass`
+2. Set repo secret `ADO_PAT` to an Azure DevOps PAT with **Work Items: Read**
 
-Connect `lordeglory/workitem-link` to your Azure Boards project before expecting a real id to pass.
+Then `AB#356` passes if that work item exists in Lockton or any other project in that org. `AB#359` still fails if the id does not exist.
 
-Optional extra check: set `ADO_ORGANIZATION`, `ADO_PROJECT`, and `ADO_PAT` (Work Items: Read) to also call the Azure Boards REST API.
+Without `ADO_PAT`, the check can only accept GitHub-rewritten links from the connected project.
 
 ## Plan limit
 
@@ -100,10 +99,8 @@ On a **private** repository in a **GitHub Free** organization, classic branch pr
 
 ## What a valid PR looks like
 
-Put the mention in the **description**, then let Azure Boards turn it into a link:
-
 ```text
-Fixes AB#1842
+AB#356
 ```
 
-After Boards processes it, the description becomes a work-item URL and the check passes. Dependabot PRs are skipped.
+in the pull request description. Dependabot PRs are skipped.

@@ -1,13 +1,13 @@
 /**
  * GitHub Actions entrypoint.
  *
- * Reads the pull_request event, re-fetches the latest description (Azure
- * Boards may rewrite AB# into a real link after the webhook fires), and
- * fails unless a linked work item URL is present.
+ * Prefer an org-wide Azure Boards lookup so work items in any project pass.
+ * If ADO_PAT is not set, fall back to GitHub-created AB# links (connected
+ * project only) and wait briefly for Azure Boards to rewrite the description.
  */
 
 import { readFileSync } from "node:fs";
-import { evaluateWorkItemPolicy } from "./policy.js";
+import { evaluateWorkItemPolicy, findWorkItemIds } from "./policy.js";
 import { verifyWorkItemIds } from "./azure-boards.js";
 
 const BOARDS_REWRITE_ATTEMPTS = 3;
@@ -26,10 +26,9 @@ function readEvent() {
 
 function adoConfig() {
   const organization = process.env.ADO_ORGANIZATION;
-  const project = process.env.ADO_PROJECT;
   const token = process.env.ADO_PAT;
-  if (!organization || !project || !token) return null;
-  return { organization, project, token };
+  if (!organization || !token) return null;
+  return { organization, token };
 }
 
 async function fetchPullRequest(event) {
@@ -62,17 +61,22 @@ function canRefetch() {
   return Boolean(process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY);
 }
 
+function policyInput(pr, event, verifiedIds) {
+  return {
+    title: pr.title,
+    body: pr.body,
+    author: pr.user?.login ?? event.pull_request?.user?.login,
+    verifiedIds,
+  };
+}
+
 async function evaluateWithBoardsRewrite(event) {
   const attempts = canRefetch() ? BOARDS_REWRITE_ATTEMPTS : 1;
   let result;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const pr = await fetchPullRequest(event);
-    result = evaluateWorkItemPolicy({
-      title: pr.title,
-      body: pr.body,
-      author: pr.user?.login ?? event.pull_request?.user?.login,
-    });
+    result = evaluateWorkItemPolicy(policyInput(pr, event));
 
     if (result.ok || result.skipped || result.unlinked.length === 0) {
       return result;
@@ -90,6 +94,16 @@ async function evaluateWithBoardsRewrite(event) {
   return result;
 }
 
+function describeVerified(verified) {
+  return verified
+    .map((item) => {
+      const project = item.project ? ` in ${item.project}` : "";
+      const title = item.title ? `: ${item.title}` : "";
+      return `AB#${item.id}${project}${title}`;
+    })
+    .join("; ");
+}
+
 async function main() {
   const event = readEvent();
   const pr = event.pull_request;
@@ -99,25 +113,32 @@ async function main() {
     return;
   }
 
-  let result = await evaluateWithBoardsRewrite(event);
-
   const ado = adoConfig();
-  if (result.ok && !result.skipped && ado) {
-    const { verified, missing } = await verifyWorkItemIds(result.ids, ado);
-    if (missing.length > 0) {
-      result = {
-        ok: false,
-        skipped: false,
-        ids: verified,
-        unlinked: missing,
-        reason: `Azure Boards could not find: ${missing.map((id) => `AB#${id}`).join(", ")}`,
-      };
-    } else {
-      result = {
-        ...result,
-        reason: `Verified in Azure Boards: ${verified.map((id) => `AB#${id}`).join(", ")}`,
-      };
+  let result;
+
+  if (ado) {
+    const latest = await fetchPullRequest(event);
+    const ids = findWorkItemIds(`${latest.title}\n${latest.body}`);
+    result = evaluateWorkItemPolicy(policyInput(latest, event));
+    if (!result.skipped && ids.length > 0) {
+      const { verified, missing } = await verifyWorkItemIds(ids, ado);
+      result = evaluateWorkItemPolicy({
+        ...policyInput(latest, event),
+        verifiedIds: verified.map((item) => item.id),
+      });
+      if (result.ok) {
+        result = { ...result, reason: `Verified in Azure Boards: ${describeVerified(verified)}` };
+      } else if (missing.length > 0) {
+        result = {
+          ...result,
+          reason: `Not found in Azure DevOps org ${ado.organization} (all projects): ${missing
+            .map((id) => `AB#${id}`)
+            .join(", ")}`,
+        };
+      }
     }
+  } else {
+    result = await evaluateWithBoardsRewrite(event);
   }
 
   if (result.ok) {

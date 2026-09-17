@@ -66,6 +66,28 @@ test("fails when a fake markdown link id does not match the URL", () => {
   assert.equal(result.ok, false);
 });
 
+test("passes a bare AB# when Azure DevOps confirms it exists in any project", () => {
+  const result = evaluateWorkItemPolicy({
+    title: "Update README.md",
+    body: "AB#356",
+    author: "maunak",
+    verifiedIds: ["356"],
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.ids, ["356"]);
+});
+
+test("fails a bare AB# when Azure DevOps does not have that id", () => {
+  const result = evaluateWorkItemPolicy({
+    title: "Update README.md",
+    body: "AB#359",
+    author: "maunak",
+    verifiedIds: [],
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.unlinked, ["359"]);
+});
+
 test("skips dependabot", () => {
   const result = evaluateWorkItemPolicy({
     title: "Bump lodash",
