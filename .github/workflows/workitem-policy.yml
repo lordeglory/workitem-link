@@ -5,20 +5,34 @@ name: Work item policy
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize]
+  merge_group:
 
 concurrency:
-  group: workitem-${{ github.repository }}-${{ github.event.pull_request.number }}
+  group: workitem-${{ github.repository }}-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   workitem-linked:
     name: Work item linked
     runs-on: ubuntu-latest
     steps:
+      # GitHub stores required checks on the commit SHA. Editing the PR body
+      # does not create a new commit, so a green check stays mergeable until
+      # this run finishes. Convert to draft first so Merge is blocked immediately.
+      - name: Block merge while the work item is re-checked
+        if: github.event_name == 'pull_request' && github.event.pull_request.state == 'open'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "false" ]; then
+            gh pr ready "$PR_NUMBER" --undo --repo "$GITHUB_REPOSITORY"
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -33,3 +47,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ADO_ORGANIZATION: ${{ vars.ADO_ORGANIZATION }}
           ADO_PAT: ${{ secrets.ADO_PAT }}
+
+      - name: Allow merge
+        if: github.event_name == 'pull_request' && github.event.pull_request.state == 'open' && success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" = "true" ]; then
+            gh pr ready "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+          fi

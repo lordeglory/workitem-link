@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { evaluateWorkItemPolicy, findWorkItemIds } from "./policy.js";
 import { verifyWorkItemIds } from "./azure-boards.js";
+import { resolvePullRequestNumber } from "./pull-request.js";
 
 const BOARDS_REWRITE_ATTEMPTS = 3;
 const BOARDS_REWRITE_WAIT_MS = 5000;
@@ -34,7 +35,7 @@ function adoConfig() {
 async function fetchPullRequest(event) {
   const token = process.env.GITHUB_TOKEN;
   const repo = process.env.GITHUB_REPOSITORY;
-  const number = event.pull_request?.number;
+  const number = resolvePullRequestNumber(event);
   if (!token || !repo || !number) return event.pull_request;
 
   const response = await fetch(`https://api.github.com/repos/${repo}/pulls/${number}`, {
@@ -106,10 +107,10 @@ function describeVerified(verified) {
 
 async function main() {
   const event = readEvent();
-  const pr = event.pull_request;
+  const number = resolvePullRequestNumber(event);
 
-  if (!pr) {
-    console.log("Not a pull_request event; nothing to enforce.");
+  if (!number && !event.pull_request) {
+    console.log("No pull request in this event; nothing to enforce.");
     return;
   }
 

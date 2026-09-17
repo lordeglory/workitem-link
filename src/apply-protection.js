@@ -101,7 +101,7 @@ function buildProtection(existing, checkName) {
         contexts: [],
         checks,
       },
-      enforce_admins: false,
+      enforce_admins: true,
       required_pull_request_reviews: {
         dismiss_stale_reviews: false,
         require_code_owner_reviews: false,
@@ -119,7 +119,7 @@ function buildProtection(existing, checkName) {
       contexts: [],
       checks,
     },
-    enforce_admins: Boolean(existing.enforce_admins?.enabled),
+    enforce_admins: true,
     required_pull_request_reviews: mapReviews(existing.required_pull_request_reviews),
     restrictions: mapRestrictions(existing.restrictions),
     allow_force_pushes: Boolean(existing.allow_force_pushes?.enabled),

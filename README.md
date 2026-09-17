@@ -20,7 +20,7 @@ requires status check
 merge blocked until a valid work item is linked
 ```
 
-You cannot add a new checkbox to GitHub’s Settings → Branches page. Requiring this status check **is** that checkbox.
+GitHub required checks live on the **commit SHA**, not the description. Changing `AB#356` to `AB#359` after a green check does not create a new commit, so Merge can still work until a new run finishes. This workflow converts the PR to **draft** as soon as it starts, then marks it ready only if the current description is a real work item. Branch protection also uses **Do not allow bypassing the above settings** so admins cannot merge through that window.
 
 ## Layout
 
