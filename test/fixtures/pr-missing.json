@@ -1,0 +1,9 @@
+{
+  "action": "opened",
+  "pull_request": {
+    "number": 1,
+    "title": "Fix login timeout",
+    "body": "Users were getting kicked out.",
+    "user": { "login": "maunak" }
+  }
+}

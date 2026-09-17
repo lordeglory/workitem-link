@@ -1,0 +1,9 @@
+{
+  "action": "opened",
+  "pull_request": {
+    "number": 2,
+    "title": "Fix login timeout",
+    "body": "Fixes AB#1842",
+    "user": { "login": "maunak" }
+  }
+}

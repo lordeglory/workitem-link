@@ -1,0 +1,15 @@
+{
+  "name": "workitem-link",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Enforce Azure Boards work-item links on GitHub PRs using a legacy branch protection required status check.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check": "node src/check.js",
+    "protect": "node src/apply-protection.js"
+  }
+}
