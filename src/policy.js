@@ -1,20 +1,47 @@
 /**
  * Work-item policy (the ADO analog of "Check for linked work items").
  *
- * Azure Boards + GitHub linking uses AB#<id> in the PR title or body.
- * This module only decides pass/fail. GitHub Actions turns that into a
- * status check; legacy branch protection requires that check to merge.
+ * A bare AB#359 in the PR is not enough. Azure Boards only rewrites a
+ * valid work item in the description into a markdown link:
+ *   [AB#123](https://dev.azure.com/{org}/{project}/_workitems/edit/123)
+ * Invalid ids, title-only mentions, and unconnected repos stay as plain
+ * AB# text and must fail.
  */
 
-const WORK_ITEM_RE = /\bAB#(\d+)\b/gi;
+const LINKED_RE =
+  /\[AB#(\d+)\]\((https?:\/\/[^)\s]+\/_workitems\/edit\/(\d+)(?:\?[^)\s]*)?)\)/gi;
+const BARE_RE = /\bAB#(\d+)\b/gi;
 const SKIP_AUTHORS = new Set(["dependabot[bot]", "github-actions[bot]"]);
 
-export function findWorkItemIds(text) {
-  const ids = new Set();
-  for (const match of String(text ?? "").matchAll(WORK_ITEM_RE)) {
-    ids.add(match[1]);
+export function extractWorkItems(text) {
+  const source = String(text ?? "");
+  const linked = [];
+  const linkedIds = new Set();
+
+  for (const match of source.matchAll(LINKED_RE)) {
+    const [, id, , urlId] = match;
+    if (id === urlId) {
+      linkedIds.add(id);
+      linked.push(id);
+    }
   }
-  return [...ids];
+
+  const unlinked = [];
+  const withoutLinked = source.replace(LINKED_RE, "");
+  for (const match of withoutLinked.matchAll(BARE_RE)) {
+    const id = match[1];
+    if (!linkedIds.has(id)) unlinked.push(id);
+  }
+
+  return {
+    linked: [...new Set(linked)],
+    unlinked: [...new Set(unlinked)],
+  };
+}
+
+export function findWorkItemIds(text) {
+  const { linked, unlinked } = extractWorkItems(text);
+  return [...new Set([...linked, ...unlinked])];
 }
 
 export function evaluateWorkItemPolicy({ title = "", body = "", author = "" } = {}) {
@@ -23,25 +50,55 @@ export function evaluateWorkItemPolicy({ title = "", body = "", author = "" } = 
       ok: true,
       skipped: true,
       ids: [],
+      unlinked: [],
       reason: `Skipped work-item policy for ${author}`,
     };
   }
 
-  const ids = findWorkItemIds(`${title}\n${body}`);
-  if (ids.length === 0) {
+  // Azure Boards links the description, not the title. Still scan both so a
+  // title-only AB# is reported as unlinked instead of silently ignored.
+  const { linked, unlinked } = extractWorkItems(`${title}\n${body}`);
+
+  if (linked.length === 0 && unlinked.length === 0) {
     return {
       ok: false,
       skipped: false,
       ids: [],
+      unlinked: [],
       reason:
-        "No Azure Boards work item found. Add a reference like AB#123 to the pull request title or description.",
+        "No Azure Boards work item found. Add a valid AB#123 to the pull request description (not only the title).",
+    };
+  }
+
+  if (linked.length === 0) {
+    return {
+      ok: false,
+      skipped: false,
+      ids: [],
+      unlinked,
+      reason:
+        `Found ${unlinked.map((id) => `AB#${id}`).join(", ")} but Azure Boards did not create a work-item link. ` +
+        "That means the id is invalid, the mention is only in the title, or this GitHub repo is not connected to Azure Boards.",
+    };
+  }
+
+  if (unlinked.length > 0) {
+    return {
+      ok: false,
+      skipped: false,
+      ids: linked,
+      unlinked,
+      reason:
+        `Unlinked or invalid references: ${unlinked.map((id) => `AB#${id}`).join(", ")}. ` +
+        "Remove them or use work item ids that Azure Boards can link from the PR description.",
     };
   }
 
   return {
     ok: true,
     skipped: false,
-    ids,
-    reason: `Linked work items: ${ids.map((id) => `AB#${id}`).join(", ")}`,
+    ids: linked,
+    unlinked: [],
+    reason: `Linked work items: ${linked.map((id) => `AB#${id}`).join(", ")}`,
   };
 }

@@ -30,6 +30,7 @@ jobs:
       - name: Enforce work-item link
         run: node src/check.js
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ADO_ORGANIZATION: ${{ vars.ADO_ORGANIZATION }}
           ADO_PROJECT: ${{ vars.ADO_PROJECT }}
           ADO_PAT: ${{ secrets.ADO_PAT }}

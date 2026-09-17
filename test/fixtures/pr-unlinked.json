@@ -1,0 +1,9 @@
+{
+  "action": "edited",
+  "pull_request": {
+    "number": 3,
+    "title": "Fix header formatting",
+    "body": "AB#359",
+    "user": { "login": "maunak" }
+  }
+}

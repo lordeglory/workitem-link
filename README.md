@@ -2,7 +2,7 @@
 
 GitHub has no native **Check for linked work items** branch policy like Azure DevOps. This repo is the equivalent, using the two pieces GitHub *does* give you:
 
-1. A pull request check that fails unless the PR mentions `AB#123`
+1. A pull request check that fails unless Azure Boards turns `AB#123` into a real work-item link
 2. A **legacy branch protection** rule that requires that check before merge
 
 ```text
@@ -17,7 +17,7 @@ requires status check
 "Work item linked"
         │
         ▼
-merge blocked until AB# is present
+merge blocked until a valid work item is linked
 ```
 
 You cannot add a new checkbox to GitHub’s Settings → Branches page. Requiring this status check **is** that checkbox.
@@ -44,8 +44,11 @@ node --test
 GITHUB_EVENT_PATH=test/fixtures/pr-missing.json node src/check.js
 # exits 1 — no AB#
 
+GITHUB_EVENT_PATH=test/fixtures/pr-unlinked.json node src/check.js
+# exits 1 — AB#359 is not a linked work item
+
 GITHUB_EVENT_PATH=test/fixtures/pr-linked.json node src/check.js
-# exits 0 — AB#1842
+# exits 0 — Azure Boards markdown link
 ```
 
 ## Turn it on in a GitHub repo
@@ -77,15 +80,19 @@ GITHUB_TOKEN=ghp_... node src/apply-protection.js --owner lordeglory --repo work
 
 The script **merges** with any existing protection. It does not wipe reviews or other required checks.
 
-## Optional: verify the work item in Azure Boards
+## What counts as a valid link
 
-Pattern matching `AB#123` is the default. To also fail on ids that do not exist, set repo variables/secrets:
+`AB#359` as plain text is **not** enough. Azure Boards only converts a **valid** id in the **PR description** into:
 
-- `ADO_ORGANIZATION`
-- `ADO_PROJECT`
-- `ADO_PAT` (secret, Work Items: Read)
+```md
+[AB#123](https://dev.azure.com/{org}/{project}/_workitems/edit/123)
+```
 
-The workflow already forwards those into `src/check.js`.
+That rewrite is the same signal GitHub shows in the PR Development section. Bare `AB#` text means the id is invalid, it was only put in the title, or this repo is not connected to Azure Boards.
+
+Connect `lordeglory/workitem-link` to your Azure Boards project before expecting a real id to pass.
+
+Optional extra check: set `ADO_ORGANIZATION`, `ADO_PROJECT`, and `ADO_PAT` (Work Items: Read) to also call the Azure Boards REST API.
 
 ## Plan limit
 
@@ -93,11 +100,10 @@ On a **private** repository in a **GitHub Free** organization, classic branch pr
 
 ## What a valid PR looks like
 
-```text
-Title: AB#1842 Fix login timeout
+Put the mention in the **description**, then let Azure Boards turn it into a link:
 
-or body:
+```text
 Fixes AB#1842
 ```
 
-Dependabot PRs are skipped so dependency bumps are not blocked.
+After Boards processes it, the description becomes a work-item URL and the check passes. Dependabot PRs are skipped.

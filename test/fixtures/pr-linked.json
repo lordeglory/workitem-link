@@ -3,7 +3,7 @@
   "pull_request": {
     "number": 2,
     "title": "Fix login timeout",
-    "body": "Fixes AB#1842",
+    "body": "Fixes [AB#1842](https://dev.azure.com/fabrikam/web/_workitems/edit/1842)",
     "user": { "login": "maunak" }
   }
 }

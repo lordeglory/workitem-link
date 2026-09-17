@@ -1,14 +1,17 @@
 /**
  * GitHub Actions entrypoint.
  *
- * Reads the pull_request event, evaluates the work-item policy, and
- * exits 1 on failure. The workflow job name becomes the status check
- * that legacy branch protection can require.
+ * Reads the pull_request event, re-fetches the latest description (Azure
+ * Boards may rewrite AB# into a real link after the webhook fires), and
+ * fails unless a linked work item URL is present.
  */
 
 import { readFileSync } from "node:fs";
 import { evaluateWorkItemPolicy } from "./policy.js";
 import { verifyWorkItemIds } from "./azure-boards.js";
+
+const BOARDS_REWRITE_ATTEMPTS = 3;
+const BOARDS_REWRITE_WAIT_MS = 5000;
 
 function readEvent() {
   const eventPath = process.env.GITHUB_EVENT_PATH;
@@ -29,6 +32,64 @@ function adoConfig() {
   return { organization, project, token };
 }
 
+async function fetchPullRequest(event) {
+  const token = process.env.GITHUB_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  const number = event.pull_request?.number;
+  if (!token || !repo || !number) return event.pull_request;
+
+  const response = await fetch(`https://api.github.com/repos/${repo}/pulls/${number}`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+
+  if (!response.ok) {
+    console.log(`Could not re-fetch PR #${number} (${response.status}); using webhook payload.`);
+    return event.pull_request;
+  }
+
+  return response.json();
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function canRefetch() {
+  return Boolean(process.env.GITHUB_TOKEN && process.env.GITHUB_REPOSITORY);
+}
+
+async function evaluateWithBoardsRewrite(event) {
+  const attempts = canRefetch() ? BOARDS_REWRITE_ATTEMPTS : 1;
+  let result;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const pr = await fetchPullRequest(event);
+    result = evaluateWorkItemPolicy({
+      title: pr.title,
+      body: pr.body,
+      author: pr.user?.login ?? event.pull_request?.user?.login,
+    });
+
+    if (result.ok || result.skipped || result.unlinked.length === 0) {
+      return result;
+    }
+
+    if (attempt < attempts) {
+      console.log(
+        `Waiting for Azure Boards to link ${result.unlinked.map((id) => `AB#${id}`).join(", ")} ` +
+          `(attempt ${attempt}/${attempts})...`,
+      );
+      await sleep(BOARDS_REWRITE_WAIT_MS);
+    }
+  }
+
+  return result;
+}
+
 async function main() {
   const event = readEvent();
   const pr = event.pull_request;
@@ -38,11 +99,7 @@ async function main() {
     return;
   }
 
-  let result = evaluateWorkItemPolicy({
-    title: pr.title,
-    body: pr.body,
-    author: pr.user?.login,
-  });
+  let result = await evaluateWithBoardsRewrite(event);
 
   const ado = adoConfig();
   if (result.ok && !result.skipped && ado) {
@@ -52,6 +109,7 @@ async function main() {
         ok: false,
         skipped: false,
         ids: verified,
+        unlinked: missing,
         reason: `Azure Boards could not find: ${missing.map((id) => `AB#${id}`).join(", ")}`,
       };
     } else {
@@ -67,7 +125,6 @@ async function main() {
     return;
   }
 
-  // GitHub Actions annotation: shows on the PR Checks tab and files view.
   console.log(`::error::${result.reason}`);
   process.exitCode = 1;
 }
