@@ -1,5 +1,5 @@
 # Work item link policy
-
+ 
 GitHub has no native **Check for linked work items** branch policy like Azure DevOps. This repo is the equivalent, using the two pieces GitHub *does* give you:
 
 1. A pull request check that fails unless Azure Boards turns `AB#123` into a real work-item link
